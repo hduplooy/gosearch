@@ -4,7 +4,7 @@
 
 This is a work in progress and more algorithms will be added over time.
 
-For examples on how to use the routines please look at [https://github.com/hduplooy/gosearch-test](hduplooy/gosearch-test).
+For examples on how to use the routines please look at [hduplooy/gosearch-test](https://github.com/hduplooy/gosearch-test).
 
 There are 4 algorithms currently and each are called the same and return the same kind of results:
 * DepthFirstSearch - For every element each of its descendants are searched first before siblings are done till a goal is found,
