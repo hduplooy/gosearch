@@ -1,9 +1,14 @@
 // github.com/hduplooy/gosearch
 // Author: Hannes du Plooy
 // Revision Date: 3 Sep 2016
+// Revision Date: 8 Sep 2016 - Implemented priority queues for BestCostSearch
 // AI search routines in go
 // This is a work in progress and not exhaustive
 package gosearch
+
+import (
+	"container/heap"
+)
 
 // searchElement is used by the routines to keep a queue of elements that need to be processed
 // Next points to the next element in the queue
@@ -134,23 +139,75 @@ func BreadthFirstSearch(data SearchF, keephistory bool) (int, SearchF, []SearchF
 	return cnt, nil, nil
 }
 
-// BestCostSearch is similar to to DepthFirstSearch except that a priority queue is kept in place with the lowest cost elements earlier in the queue
+// costElement is used in BestCostSearch as an element in a minimum priority queue
+// The standard golang heap is used to implement the priority queue
+type costElement struct {
+	// The parent if we want to record the history
+	Parent *costElement
+	// The interface that will give us the cost and away
+	Data SearchF
+	// Used in the priority queue to fix the position
+	Index int
+}
+
+// costPriorityQueue is a interface definition to implement the heap.Interface
+type costPriorityQueue []*costElement
+
+// Len returns the number of elements in the queue
+func (pq costPriorityQueue) Len() int { return len(pq) }
+
+// Less returns if the first element is less than the second
+// The cost + the estimated distance is used in the comparison
+// If return a 0 with the Away func then it reduces sort of to Dijkstra's Algorithm
+func (pq costPriorityQueue) Less(i, j int) bool {
+	return pq[i].Data.Cost()+pq[i].Data.Away() < pq[j].Data.Cost()+pq[j].Data.Away()
+}
+
+// Swap will swap the entries in the queue
+func (pq costPriorityQueue) Swap(i, j int) {
+	pq[i], pq[j] = pq[j], pq[i]
+	pq[i].Index = i
+	pq[j].Index = j
+}
+
+// Push pushes a value on the back of the array
+// heap.Push calls this and then sorts out where it really should go in the queue
+func (pq *costPriorityQueue) Push(x interface{}) {
+	n := len(*pq)
+	item := x.(*costElement)
+	item.Index = n
+	*pq = append(*pq, item)
+}
+
+// Pop returns the last element in the queue which should be the lowest value
+// heap.Pop calls this and then sorts out the queue if it should be
+func (pq *costPriorityQueue) Pop() interface{} {
+	old := *pq
+	item := old[len(old)-1]
+	item.Index = -1
+	*pq = old[:len(old)-1]
+
+	return item
+}
+
+// BestCostSearch is similar to to DepthFirstSearch except that a priority queue is kept in place with the lowest cost+away elements earlier in the queue
 // BestCostSearch will start the search and search until the Done() func returns true
 // If keephistory is true the elements that led to the goal state is also returned
 // the number of steps to the goal, the goal and the history is returned
 func BestCostSearch(data SearchF, keephistory bool) (int, SearchF, []SearchF) {
 	// map to check if elements are already being processed or were processed
 	pres := make(map[string]bool)
-	// The head of the queue start with the first element provided
-	head := NewElement(data)
+	// Initializes heap
+	pq := make(costPriorityQueue, 0, 100)
+	heap.Init(&pq)
+	// Push start state on queue
+	heap.Push(&pq, &costElement{Data: data})
 	cnt := 0
 	// while there is still something to do
-	for head != nil {
+	for pq.Len() > 0 {
 		cnt++
-		// Get the first one in the queue
-		cur := head
-		// Remove from queue
-		head = head.Next
+		// Get the lowest cost+away in the queue and remove
+		cur := heap.Pop(&pq).(*costElement)
 		// If it is done then generate the history (if any) and return the steps, goal and history
 		if cur.Data.Done() {
 			hist := make([]SearchF, 0, 10)
@@ -164,91 +221,14 @@ func BestCostSearch(data SearchF, keephistory bool) (int, SearchF, []SearchF) {
 		key := cur.Data.Key()
 		if _, ok := pres[key]; !ok {
 			// Get all the valid descendants and put it in queue based on it's cost
-			for _, val := range cur.Data.Descendants() {
-				newel := NewElement(val)
+			descendants := cur.Data.Descendants()
+			for _, val := range descendants {
+				newel := &costElement{Data: val}
 				if keephistory {
 					newel.Parent = cur
 				}
-				if head == nil {
-					head = newel
-				} else {
-					tmp := head
-					var prev *searchElement
-					// Search for place where it must be inserted
-					for tmp != nil && tmp.Data.Cost() < newel.Data.Cost() {
-						prev = tmp
-						tmp = tmp.Next
-					}
-					if prev == nil {
-						newel.Next = head
-						head = newel
-					} else {
-						newel.Next = tmp
-						prev.Next = newel
-					}
-				}
-			}
-		}
-	}
-	return cnt, nil, nil
-}
-
-// BestCostAwaySearch is similar to to BestCostSearch except that the priority queue is based on the least cost+distance away from goal
-// BestCostAwaySearch will start the search and search until the Done() func returns true
-// If keephistory is true the elements that led to the goal state is also returned
-// the number of steps to the goal, the goal and the history is returned
-func BestCostAwaySearch(data SearchF, keephistory bool) (int, SearchF, []SearchF) {
-	// map to check if elements are already being processed or were processed
-	pres := make(map[string]bool)
-	// The head of the queue start with the first element provided
-	head := NewElement(data)
-	cnt := 0
-	// while there is still something to do
-	for head != nil {
-		cnt++
-		// Get the first one in the queue
-		cur := head
-		// Remove from queue
-		head = head.Next
-		// If it is done then generate the history (if any) and return the steps, goal and history
-		if cur.Data.Done() {
-			hist := make([]SearchF, 0, 10)
-			tmp := cur.Parent
-			for i := 0; tmp != nil; i, tmp = i+1, tmp.Parent {
-				hist = append(hist, tmp.Data)
-			}
-			return cnt, cur.Data, hist
-		}
-		// If not done - get the key for the element and if not present process it
-		key := cur.Data.Key()
-		if _, ok := pres[key]; !ok {
-			// Get all the valid descendants and put it in queue based on it's cost + distance away from goal
-			for _, val := range cur.Data.Descendants() {
-				if val == nil {
-					return cnt, nil, nil
-				}
-				newel := NewElement(val)
-				if keephistory {
-					newel.Parent = cur
-				}
-				if head == nil {
-					head = newel
-				} else {
-					tmp := head
-					var prev *searchElement
-					// Search for the position in the queue
-					for tmp != nil && tmp.Data.Cost()+tmp.Data.Away() < newel.Data.Cost()+newel.Data.Away() {
-						prev = tmp
-						tmp = tmp.Next
-					}
-					if prev == nil {
-						newel.Next = head
-						head = newel
-					} else {
-						newel.Next = tmp
-						prev.Next = newel
-					}
-				}
+				// Push back on priority queue based on the cost+away
+				heap.Push(&pq, newel)
 			}
 		}
 	}
